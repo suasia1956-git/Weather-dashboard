@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Weather Dashboard</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&display=swap">
+<style>
+  :root {
+    --bg: #eef3fb; --surface: #ffffff; --text: #111a33; --muted: #5b6785;
+    --accent: #2447e0; --accent-soft: #e3eaff; --error: #b42318; --error-bg: #fdeceb;
+    --border: #d9e1f2;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0d1426; --surface: #161f38; --text: #e8edfb; --muted: #9aa7c7;
+      --accent: #7f9bff; --accent-soft: #212d52; --error: #ff9b92; --error-bg: #3a1c1f;
+      --border: #27345a;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: "Outfit", system-ui, sans-serif;
+    background: var(--bg); color: var(--text); min-height: 100vh;
+    display: flex; justify-content: center; padding: 24px 16px;
+  }
+  main { width: 100%; max-width: 560px; }
+  h1 { font-size: 1.6rem; margin: 0 0 16px; }
+  form { display: flex; gap: 8px; margin-bottom: 16px; }
+  input {
+    flex: 1; padding: 14px 16px; font: inherit; color: var(--text);
+    background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+  }
+  input:focus-visible, button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  button {
+    padding: 14px 20px; font: inherit; font-weight: 600; border: 0; border-radius: 12px;
+    background: var(--accent); color: #fff; cursor: pointer;
+  }
+  @media (prefers-color-scheme: dark) { button { color: #0d1426; } }
+  button:disabled { opacity: .6; cursor: wait; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 20px; }
+  .hero { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .city { font-size: 1.3rem; font-weight: 600; margin: 0; }
+  .sub { color: var(--muted); margin: 4px 0 0; font-size: .95rem; }
+  .temp { font-size: 3.4rem; font-weight: 700; line-height: 1; }
+  .icon { font-size: 3rem; }
+  .metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 20px; }
+  .metric { background: var(--accent-soft); border-radius: 12px; padding: 12px; }
+  .metric span { display: block; color: var(--muted); font-size: .8rem; }
+  .metric strong { font-size: 1.15rem; }
+  h2 { font-size: 1.05rem; margin: 24px 0 10px; }
+  .forecast { display: grid; grid-template-columns: repeat(auto-fit, minmax(90px, 1fr)); gap: 8px; }
+  .day { border: 1px solid var(--border); border-radius: 12px; padding: 10px; text-align: center; font-size: .9rem; }
+  .day .i { font-size: 1.5rem; }
+  .msg { border-radius: 12px; padding: 14px 16px; margin-bottom: 16px; }
+  .error { background: var(--error-bg); color: var(--error); }
+  .info { color: var(--muted); text-align: center; padding: 32px 0; }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Weather Dashboard</h1>
+
+  <form id="searchForm">
+    <input id="cityInput" type="text" placeholder="Search a city, e.g. Chennai" aria-label="City name" autocomplete="off" required>
+    <button id="searchBtn" type="submit">Search</button>
+  </form>
+
+  <div id="error" class="msg error hidden" role="alert"></div>
+  <div id="status" class="info">Search for a city to see its live weather.</div>
+
+  <section id="result" class="card hidden" aria-live="polite">
+    <div class="hero">
+      <div>
+        <p class="city" id="place"></p>
+        <p class="sub" id="desc"></p>
+      </div>
+      <div style="text-align:right">
+        <div class="icon" id="icon"></div>
+        <div class="temp" id="temp"></div>
+      </div>
+    </div>
+    <div class="metrics">
+      <div class="metric"><span>Feels like</span><strong id="feels"></strong></div>
+      <div class="metric"><span>Humidity</span><strong id="humidity"></strong></div>
+      <div class="metric"><span>Wind speed</span><strong id="wind"></strong></div>
+    </div>
+    <h2>Next 5 days</h2>
+    <div class="forecast" id="forecast"></div>
+  </section>
+</main>
+
+<script>
+  const GEO_URL = "https://geocoding-api.open-meteo.com/v1/search";
+  const WEATHER_URL = "https://api.open-meteo.com/v1/forecast";
+
+  const $ = (id) => document.getElementById(id);
+
+  // WMO weather codes -> description + emoji
+  const CODES = {
+    0: ["Clear sky", "☀️"], 1: ["Mainly clear", "🌤️"], 2: ["Partly cloudy", "⛅"], 3: ["Overcast", "☁️"],
+    45: ["Fog", "🌫️"], 48: ["Rime fog", "🌫️"],
+    51: ["Light drizzle", "🌦️"], 53: ["Drizzle", "🌦️"], 55: ["Heavy drizzle", "🌧️"],
+    61: ["Light rain", "🌧️"], 63: ["Rain", "🌧️"], 65: ["Heavy rain", "🌧️"],
+    71: ["Light snow", "🌨️"], 73: ["Snow", "🌨️"], 75: ["Heavy snow", "❄️"],
+    80: ["Rain showers", "🌦️"], 81: ["Rain showers", "🌧️"], 82: ["Violent showers", "⛈️"],
+    95: ["Thunderstorm", "⛈️"], 96: ["Thunderstorm with hail", "⛈️"], 99: ["Thunderstorm with hail", "⛈️"]
+  };
+  const describe = (code) => CODES[code] || ["Unknown", "🌡️"];
+
+  // Reusable fetch helper with error handling for network + HTTP failures
+  async function getJSON(url) {
+    let response;
+    try {
+      response = await fetch(url);
+    } catch (err) {
+      throw new Error("Network error. Check your internet connection and try again.");
+    }
+    if (!response.ok) {
+      throw new Error(`The weather service returned an error (${response.status}). Try again later.`);
+    }
+    return response.json();
+  }
+
+  async function findCity(name) {
+    const data = await getJSON(`${GEO_URL}?name=${encodeURIComponent(name)}&count=1&language=en&format=json`);
+    if (!data.results || data.results.length === 0) {
+      throw new Error(`No city found for "${name}". Check the spelling and try again.`);
+    }
+    return data.results[0]; // nested object: name, country, latitude, longitude...
+  }
+
+  async function getWeather(lat, lon) {
+    const params = new URLSearchParams({
+      latitude: lat, longitude: lon,
+      current: "temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m",
+      daily: "weather_code,temperature_2m_max,temperature_2m_min",
+      timezone: "auto", forecast_days: 6
+    });
+    return getJSON(`${WEATHER_URL}?${params}`);
+  }
+
+  function render(place, w) {
+    const c = w.current, u = w.current_units, d = w.daily;
+    const [text, icon] = describe(c.weather_code);
+
+    $("place").textContent = [place.name, place.admin1, place.country].filter(Boolean).join(", ");
+    $("desc").textContent = text;
+    $("icon").textContent = icon;
+    $("temp").textContent = `${Math.round(c.temperature_2m)}${u.temperature_2m}`;
+    $("feels").textContent = `${Math.round(c.apparent_temperature)}${u.apparent_temperature}`;
+    $("humidity").textContent = `${c.relative_humidity_2m}${u.relative_humidity_2m}`;
+    $("wind").textContent = `${c.wind_speed_10m} ${u.wind_speed_10m}`;
+
+    // Dynamically render nested daily arrays (skip today = index 0)
+    $("forecast").innerHTML = "";
+    for (let i = 1; i < d.time.length; i++) {
+      const day = new Date(d.time[i] + "T00:00").toLocaleDateString(undefined, { weekday: "short" });
+      const [, ic] = describe(d.weather_code[i]);
+      const el = document.createElement("div");
+      el.className = "day";
+      el.innerHTML = `<div>${day}</div><div class="i">${ic}</div>
+        <div><strong>${Math.round(d.temperature_2m_max[i])}°</strong> / ${Math.round(d.temperature_2m_min[i])}°</div>`;
+      $("forecast").appendChild(el);
+    }
+    $("result").classList.remove("hidden");
+  }
+
+  function showError(message) {
+    $("error").textContent = message;
+    $("error").classList.remove("hidden");
+    $("result").classList.add("hidden");
+    $("status").classList.add("hidden");
+  }
+
+  async function search(city) {
+    $("error").classList.add("hidden");
+    $("status").textContent = "Loading weather…";
+    $("status").classList.remove("hidden");
+    $("searchBtn").disabled = true;
+    try {
+      const place = await findCity(city);
+      const weather = await getWeather(place.latitude, place.longitude);
+      render(place, weather);
+      $("status").classList.add("hidden");
+    } catch (err) {
+      showError(err.message);
+    } finally {
+      $("searchBtn").disabled = false;
+    }
+  }
+
+  $("searchForm").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const city = $("cityInput").value.trim();
+    if (city) search(city);
+  });
+</script>
+</body>
+</html>
